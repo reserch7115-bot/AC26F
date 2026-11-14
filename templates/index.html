@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI 이익 분배 대시보드</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="app-layout">
+        <!-- 좌측 컨트롤 바 -->
+        <aside class="sidebar">
+            <div class="logo-area">
+                <h1>AI 상생 분배 시뮬레이터</h1>
+                <p>Economic Simulator</p>
+            </div>
+            
+            <hr class="divider">
+            
+            <div class="control-card">
+                <label class="input-label" for="initial_profit">초기 AI 기업 총 이익 (억원)</label>
+                <div class="input-wrapper">
+                    <input type="number" id="initial_profit" min="500" max="1000000" value="1000" placeholder="예: 12500">
+                    <input type="range" id="profit_slider" min="500" max="1000000" step="500" value="1000" aria-label="초기 AI 기업 총 이익 조절">
+                    <p class="input-hint">* 최소 500억원 ~ 최대 100조원(1,000,000억원)까지 기입 가능</p>
+                </div>
+            </div>
+
+            <div class="control-card compact-grid">
+                <div class="field-group">
+                    <label class="input-label" for="tax_rate">국가 세율 조정 (%)</label>
+                    <div class="mini-input-row">
+                        <input type="number" id="tax_rate" min="5" max="60" step="1" value="25" aria-label="세율 입력값">
+                        <input type="range" id="tax_rate_slider" min="5" max="60" step="1" value="25" aria-label="세율 슬라이더">
+                    </div>
+                </div>
+
+                <div class="field-group">
+                    <label class="input-label" for="population">대한민국 인구수 (명)</label>
+                    <input type="number" id="population" min="10000000" max="100000000" step="10000" value="51744000" aria-label="인구수 입력">
+                </div>
+            </div>
+
+            <div class="control-card">
+                <label class="input-label">경제 시나리오 모드</label>
+                <div class="scenario-grid">
+                    <label class="scenario-tile"><input type="radio" name="scenario" value="steady" checked><span class="tile-label">안정 성장<br><small>경제·복지 균형</small></span></label>
+                    <label class="scenario-tile"><input type="radio" name="scenario" value="innovation"><span class="tile-label">기술 혁신<br><small>AI 투자 확대</small></span></label>
+                    <label class="scenario-tile"><input type="radio" name="scenario" value="aging"><span class="tile-label">고령화 대응<br><small>노인 부양 대응</small></span></label>
+                    <label class="scenario-tile"><input type="radio" name="scenario" value="crisis"><span class="tile-label">위기 대응<br><small>불황 대응</small></span></label>
+                </div>
+            </div>
+
+            <div class="control-card">
+                <label class="input-label">분배 방식</label>
+                <div class="distribution-grid">
+                    <label class="scenario-tile"><input type="radio" name="distribution_mode" value="basic" checked><span class="tile-label">기본소득형<br><small>생활비 균등 지급</small></span></label>
+                    <label class="scenario-tile"><input type="radio" name="distribution_mode" value="custom"><span class="tile-label">맞춤형<br><small>소득별 차등</small></span></label>
+                    <label class="scenario-tile"><input type="radio" name="distribution_mode" value="equal"><span class="tile-label">동일 분배<br><small>같은 금액 지급</small></span></label>
+                    <label class="scenario-tile"><input type="radio" name="distribution_mode" value="targeted"><span class="tile-label">집중 지원<br><small>취약층 집중</small></span></label>
+                </div>
+            </div>
+
+            <div class="control-card">
+                <label class="input-label">소득 기준 계층 분류</label>
+                <div class="radio-grid">
+                    <label class="radio-tile"><input type="radio" name="stages" value="3"><span class="tile-label">3단계</span></label>
+                    <label class="radio-tile"><input type="radio" name="stages" value="5" checked><span class="tile-label">5단계</span></label>
+                    <label class="radio-tile"><input type="radio" name="stages" value="7"><span class="tile-label">7단계</span></label>
+                    <label class="radio-tile"><input type="radio" name="stages" value="10"><span class="tile-label">10단계</span></label>
+                </div>
+            </div>
+
+            <button id="run_btn" class="primary-btn">시뮬레이션 실행하기 🚀</button>
+        </aside>
+
+        <!-- 중앙 대시보드 콘텐츠 -->
+        <main class="main-content">
+            <section class="summary-row">
+                <div class="mini-card">
+                    <span class="icon tax-icon">🪙</span>
+                    <div>
+                        <p class="card-title">2035년 예상 확보 세수</p>
+                        <h2 class="card-value"><span id="res_tax">0</span> <small>억원</small></h2>
+                    </div>
+                </div>
+                <div class="mini-card">
+                    <span class="icon rate-icon">📈</span>
+                    <div>
+                        <p class="card-title">2035년 최고 누진세율</p>
+                        <h2 class="card-value"><span id="res_rate">0</span><small>%</small></h2>
+                    </div>
+                </div>
+            </section>
+
+            <section class="impact-panel">
+                <div class="card-header">
+                    <h3>사회 변화 지표</h3>
+                </div>
+                <div id="social_impact_list" class="impact-list"></div>
+            </section>
+
+            <section class="dashboard-grid">
+                <div class="chart-card">
+                    <div class="card-header">
+                        <h3>연도별 경제 지표 추이 <small>(2026 ~ 2035)</small></h3>
+                    </div>
+                    <div class="chart-wrapper">
+                        <canvas id="economyChart"></canvas>
+                    </div>
+                </div>
+
+                <div class="report-card">
+                    <div class="card-header">
+                        <h3>2035년 시민 1인당 연간 배당금</h3>
+                    </div>
+                    <div id="distribution_list" class="report-list"></div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- Chart.js를 먼저 로드한 뒤, 메인 로직을 실행합니다 -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+</html>
