@@ -1,4 +1,8 @@
 from flask import Flask, render_template, request, jsonify
+import os
+import json
+from urllib import request as urllib_request
+from urllib.error import HTTPError, URLError
 from sklearn.tree import DecisionTreeClassifier, export_text
 from sklearn.model_selection import train_test_split
 
@@ -116,10 +120,30 @@ def run_simulation(initial_profit, stages, tax_rate, population, scenario, distr
     aging_ratio = max(15, min(60, BASE_AGING_RATIO + (scenario_cfg["aging"] - 1.0) * 16))
 
     social_impact = [
-        {"label": "소득 불균형", "value": f"{final_gini:.2f}", "note": "지니계수"},
-        {"label": "사회 안정도", "value": f"{social_stability:.0f}/100", "note": "국민 체감 지수"},
-        {"label": "고령화 부담", "value": f"{aging_ratio:.1f}%", "note": "노년부양비"},
-        {"label": "복지 커버리지", "value": f"{welfare_coverage:.0f}%", "note": "기본소득/복지"},
+        {
+            "label": "소득 불균형",
+            "value": f"{final_gini:.2f}",
+            "note": "지니계수",
+            "reason": f"2035년 지니계수는 현재 기준 {BASE_GINI:.3f}에서 시작해 매년 변화합니다. 선택한 세율과 분배 방식의 집중도에 따라 세수로 불평등을 얼마나 줄였는지가 최종 값에 반영됐습니다.",
+        },
+        {
+            "label": "사회 안정도",
+            "value": f"{social_stability:.0f}/100",
+            "note": "국민 체감 지수",
+            "reason": f"소득 불균형({final_gini:.3f}), 적용 세율({effective_rate * 100:.1f}%), 경제 시나리오의 안정성으로 계산했습니다. 불평등이 낮고 세수가 안정적일수록 이 지표가 높습니다.",
+        },
+        {
+            "label": "고령화 부담",
+            "value": f"{aging_ratio:.1f}%",
+            "note": "노년부양비",
+            "reason": f"기본 노년부양비 {BASE_AGING_RATIO:.1f}%에 선택한 경제 시나리오의 고령화 계수를 반영해 계산했습니다. 고령화 대응 시나리오를 선택하면 노인 부양 부담이 더 높게 나타납니다.",
+        },
+        {
+            "label": "복지 커버리지",
+            "value": f"{welfare_coverage:.0f}%",
+            "note": "기본소득/복지",
+            "reason": f"세율({effective_rate * 100:.1f}%), 시나리오 안정성, 선택한 분배 방식의 하위계층 집중도를 함께 반영했습니다. 취약계층에 예산을 더 집중할수록 커버리지 상승 폭이 커질 수 있습니다.",
+        },
     ]
 
     return {
@@ -259,6 +283,41 @@ def make_summary(short_grade, long_grade):
     return sentence
 
 
+def make_future_event(tax_percent, mode, stages, scenario):
+    """시나리오와 정책 강도를 바탕으로 미래 경제 전환점을 보여 준다."""
+    event_by_scenario = {
+        "innovation": (
+            "AI 자동화와 생산성 혁신이 가속되어 노동시장 구조가 빠르게 재편될 가능성",
+            "기술 투자 확대 시나리오에서는 AI 활용 기업의 이익과 산업 생산성이 크게 늘 것으로 가정합니다.",
+        ),
+        "aging": (
+            "고령 인구 증가로 돌봄·의료 수요가 급증하고 노동력 부족이 본격화될 가능성",
+            "고령화 대응 시나리오에서는 부양 부담이 커지고 사회서비스 산업이 성장하도록 가정합니다.",
+        ),
+        "crisis": (
+            "경기 침체와 소비 위축이 이어져 재정 부담과 실업률 상승이 동시 발생할 가능성",
+            "위기 대응 시나리오에서는 경제 성장률이 낮아지는 대신 취약계층 지원 필요성이 커집니다.",
+        ),
+        "steady": (
+            "AI 세수와 복지 지출이 균형을 이루며 공공투자와 소비가 안정적으로 확대될 가능성",
+            "안정 성장 시나리오에서는 경제와 복지 변화가 완만하게 나타나도록 가정합니다.",
+        ),
+    }
+    event, reason = event_by_scenario.get(scenario, event_by_scenario["steady"])
+    concentration_year = 2029
+    if tax_percent >= 35:
+        concentration_year = 2028
+    elif mode in ("targeted", "custom") or stages >= 7:
+        concentration_year = 2029
+    else:
+        concentration_year = 2030
+    return {
+        "year": concentration_year,
+        "event": event,
+        "reason": reason,
+    }
+
+
 def build_period_report(key, tax_percent, mode, stages, scenario, actual_grade):
     grade, probability, features = predict_grade(key, tax_percent, mode, stages, scenario)
     model = AI_MODELS[key]["model"]
@@ -286,6 +345,7 @@ def build_ai_report(tax_percent, mode, stages, scenario, actual_short, actual_lo
         "summary": make_summary(short_report["predicted_grade"], long_report["predicted_grade"]),
         "short_term": short_report,
         "long_term": long_report,
+        "future_event": make_future_event(tax_percent, mode, stages, scenario),
         "suggestions": suggestions,
         "training_size": AI_DATA_SIZE,
         "grade_rule": "지니계수가 0.325(현재) 이하면 '개선', 0.375 이하면 '유지', 그보다 크면 '악화'",
@@ -298,6 +358,170 @@ def build_ai_report(tax_percent, mode, stages, scenario, actual_short, actual_lo
 @app.route('/')
 def index():
     return render_template('index.html')
+
+
+def make_local_ai_answer(question, context):
+    """시뮬레이션 데이터와 의사결정나무 결과를 바탕으로 질문에 답한다."""
+    text = question.strip().replace("?", "").replace("!", "")
+    compact = text.lower().replace(" ", "")
+    ai_report = context.get("ai_report", {}) if isinstance(context, dict) else {}
+    short_term = ai_report.get("short_term", {})
+    long_term = ai_report.get("long_term", {})
+    future_event = ai_report.get("future_event", {})
+    population = context.get("population")
+    tax_list = context.get("tax") or []
+    gini_list = context.get("gini") or []
+    tax = tax_list[-1] if tax_list else context.get("tax_rate")
+    gini = gini_list[-1] if gini_list else context.get("final_gini")
+    tax_percent = context.get("tax_rate")
+    mode = context.get("distribution_mode", "-")
+    scenario = context.get("scenario", "-")
+    stages = context.get("stages")
+    initial_profit = context.get("initial_profit")
+    mode_names = {"equal": "동일 분배", "basic": "기본소득형", "custom": "맞춤형", "targeted": "집중 지원"}
+    mode_name = mode_names.get(mode, mode)
+    scenario_names = {"steady": "안정 성장", "innovation": "기술 혁신", "aging": "고령화 대응", "crisis": "위기 대응"}
+    scenario_name = scenario_names.get(scenario, scenario)
+
+    if any(word in compact for word in ("2030", "단기")) or ("예측" in compact and "2035" not in compact):
+        grade = short_term.get("predicted_grade", "-")
+        confidence = short_term.get("confidence", "-")
+        path = " → ".join(short_term.get("decision_path", []))
+        factors = short_term.get("important_factors", [])
+        factor_text = ", ".join(f"{item['factor']} {item['percent']}%" for item in factors[:3])
+        return (
+            f"2030년 예측은 '{grade}'이며, AI 예측 신뢰도는 {confidence}%입니다. "
+            f"이 예측은 의사결정나무가 세율 {tax_percent}%, {mode_name}, "
+            f"{stages}계층, {scenario_name} 시나리오를 따라내려간 결과입니다.\n"
+            f"핸들 기준 경로: {path or '특정 갈림길 정보가 없습니다.'}\n"
+            f"가장 영향을 준 요인: {factor_text or '집계 정보 없음'}."
+        )
+    if any(word in compact for word in ("2035", "장기")):
+        grade = long_term.get("predicted_grade", "-")
+        suggestions = long_term.get("suggestions", [])
+        answer = (
+            f"2035년 장기 예측은 '{grade}'이며, 신뢰도는 {long_term.get('confidence', '-')}%입니다. "
+            f"해당 시점의 지니계수는 {gini:.3f}이고 예상 세수는 약 {tax:.1f}억원입니다."
+        )
+        if suggestions:
+            answer += "\n개선 방향: " + " ".join(suggestions[:2])
+        return answer
+    if any(word in compact for word in ("좋은개선안", "개선안", "추천", "어떻게하면")):
+        suggestions = ai_report.get("suggestions", [])
+        if suggestions:
+            return "가장 현실적인 개선안은 다음과 같습니다.\n- " + "\n- ".join(suggestions)
+        if long_term.get("predicted_grade") == "개선":
+            return "현재 정책은 장기 예측이 '개선'입니다. 세율과 분배 방식을 극단적으로 바꾸기보다 세율을 낮추거나 올릴 때 지표가 어떻게 변하는지 비교하는 것이 좋습니다."
+        return "세율을 높이거나 분배 방식을 하위계층에 더 집중하면 장기 개선 가능성을 높일 수 있습니다. 다만 시뮬레이터의 가정 범위 안에서만 판단해 주세요."
+    if any(word in compact for word in ("분배방식", "분배", "배당", "지원")):
+        if any(word in compact for word in ("차이", "비교", "바꾸")):
+            return (
+                f"현재는 '{mode_name}'입니다.\n"
+                "• 동일 분배: 전 국민에게 같은 비중으로 배분\n"
+                "• 기본소득형: 하위계층에 약간 더 배분\n"
+                "• 맞춤형: 소득 구간별로 차등 배분\n"
+                "• 집중 지원: 취약계층에 예산을 강하게 집중\n"
+                "하위계층 집중도가 커질수록 불평등 완화는 강해질 수 있지만 재정 부담도 커질 수 있습니다."
+            )
+        return (
+            f"현재 분배 방식은 '{mode_name}'이고 계층 수는 {stages}단계입니다. "
+            "동일 분배는 각 계층에 같은 비중을 두고, 맞춤형과 집중 지원은 하위 계층에 더 많은 비중을 둡니다."
+        )
+    if any(word in compact for word in ("세율", "세금")):
+        message = (
+            f"현재 세율은 {tax_percent}%이고, 초기 기업 이익은 {initial_profit:,}억원입니다.\n"
+            f"2035년 예상 세수는 약 {tax:.1f}억원이며 지니계수는 {gini:.3f}입니다.\n"
+            "세율을 높이면 세수와 재분배 재원이 커질 수 있지만 경제 성장이나 기업 이익에 부담을 줄 수 있습니다."
+        )
+        if "올리" in compact or "높" in compact:
+            return message + "\n세율을 올릴 때는 세수 증가와 불평등 완화 효과가 커지는지 두 지표를 함께 확인하는 것이 좋습니다."
+        if "내리" in compact or "낮" in compact:
+            return message + "\n세율을 낮추면 기업 부담은 줄 수 있지만 배분 재원과 복지 커버리지가 감소할 수 있습니다."
+        return message
+    if any(word in compact for word in ("인구", "국민", "사람")):
+        if isinstance(population, int):
+            per_person = context.get("stages_data")
+            extra = ""
+            if per_person:
+                extra = f" 예를 들어 현재 1구간 배당금은 연 {per_person[0].get('amount', '-'):,}만원입니다."
+            return f"현재 적용된 주민등록 인구는 {population:,}명이며, 시민 1인당 배당금 계산에 사용됩니다." + extra
+        return "현재 시뮬레이션의 인구수가 아직 결과에 포함되지 않았습니다."
+    if any(word in compact for word in ("지표", "안정도", "불균형", "고령", "복지", "커버리지", "지니")):
+        metrics = context.get("social_impact", [])
+        details = []
+        for metric in metrics:
+            details.append(f"{metric['label']}: {metric['value']} ({metric.get('reason', '')})")
+        return "사회 변화 지표의 계산 근거입니다.\n" + "\n".join(details)
+    if any(word in compact for word in ("이유", "왜", "원인", "어째서")):
+        return (
+            f"이 결과는 선택한 세율, 분배 방식, 계층 수, 경제 시나리오를 복합적으로 계산한 것입니다. "
+            f"2035년 지니계수는 {gini:.3f}이고, 세수는 약 {tax:.1f}억원으로 예상됩니다. "
+            f"현재 조건은 세율 {tax_percent}%의 {mode_name}, {scenario_name} 시나리오입니다. "
+            f"예측된 경제 전환점은 '{future_event.get('year', '-')}년: {future_event.get('event', '-')}'입니다."
+        )
+    return (
+        "죄송합니다. 제가 현재 시뮬레이션 데이터로는 그 질문에 확실하게 답하기 어렵습니다. "
+        "2030년 예측, 세율 변화, 분배 방식, 인구수, 사회 변화 지표 같은 "
+        "이 화면의 정책 결과에 관해 다시 질문해 주시면 근거를 함께 설명해 드릴게요."
+    )
+
+
+@app.route('/gemini_chat', methods=['POST'])
+def gemini_chat():
+    api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+    data = request.get_json() or {}
+    question = str(data.get("question", "")).strip()
+    context = data.get("context", {})
+    history = data.get("history", [])
+    if not question:
+        return jsonify({"status": "error", "message": "질문을 입력해 주세요."}), 400
+    if len(question) > 2000:
+        return jsonify({"status": "error", "message": "질문은 2,000자 이내로 입력해 주세요."}), 400
+    if not api_key:
+        return jsonify({
+            "status": "success",
+            "answer": make_local_ai_answer(question, context),
+            "engine": "local-policy-ai",
+        })
+
+    prompt = (
+        "너는 한국어 경제 정책 분석 보조자다. 아래 시뮬레이션 결과를 근거로 사용자의 질문에 "
+        "쉽고 구체적으로 답하되, 시뮬레이션 가정과 실제 정책의 차이를 명확히 밝혀라.\n"
+        "현재 화면 데이터에 없는 정보는 추측하지 말고, 답할 수 없으면 "
+        "'죄송합니다. 이 정보는 제가 확실하게 답하기 어렵습니다.'라고 솔직하게 말하라.\n"
+        f"시뮬레이션 맥락:\n{json.dumps(context, ensure_ascii=False)}\n"
+        "최근 대화:\n" + "\n".join(
+            f"{'사용자' if item.get('role') == 'user' else 'AI'}: {item.get('content', '')}"
+            for item in history[-6:]
+            if isinstance(item, dict)
+        ) + "\n"
+        f"사용자 질문:\n{question}"
+    )
+    url = (
+        "https://generativelanguage.googleapis.com/v1beta/models/"
+        "gemini-2.5-flash:generateContent?key=" + api_key
+    )
+    payload = json.dumps({
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {"temperature": 0.3, "maxOutputTokens": 800},
+    }).encode("utf-8")
+
+    req = urllib_request.Request(
+        url,
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib_request.urlopen(req, timeout=30) as response:
+            result = json.loads(response.read().decode("utf-8"))
+        answer = result["candidates"][0]["content"]["parts"][0]["text"].strip()
+        return jsonify({"status": "success", "answer": answer})
+    except HTTPError as error:
+        detail = error.read().decode("utf-8", errors="replace")
+        return jsonify({"status": "error", "message": f"Gemini API 요청에 실패했습니다. ({error.code})", "detail": detail[:500]}), 502
+    except (URLError, TimeoutError, KeyError, IndexError, json.JSONDecodeError):
+        return jsonify({"status": "error", "message": "Gemini 응답을 가져오지 못했습니다. 잠시 후 다시 시도해 주세요."}), 502
 
 
 @app.route('/simulate', methods=['POST'])
@@ -325,6 +549,9 @@ def simulate():
             "status": "success",
             **result,
             "population": int(population),
+            "initial_profit": initial_profit,
+            "tax_rate": tax_percent,
+            "stages": stages,
             "scenario": scenario,
             "distribution_mode": distribution_mode,
             "ai_report": ai_report,

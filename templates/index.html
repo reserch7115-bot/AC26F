@@ -20,9 +20,10 @@
             <div class="control-card">
                 <label class="input-label" for="initial_profit">초기 AI 기업 총 이익 (억원)</label>
                 <div class="input-wrapper">
-                    <input type="number" id="initial_profit" min="500" max="1000000" value="1000" placeholder="예: 12500">
+                    <input type="number" id="initial_profit" max="1000000" value="1000" placeholder="예: 12500" aria-describedby="profit_error">
                     <input type="range" id="profit_slider" min="500" max="1000000" step="500" value="1000" aria-label="초기 AI 기업 총 이익 조절">
                     <p class="input-hint">* 최소 500억원 ~ 최대 100조원(1,000,000억원)까지 기입 가능</p>
+                    <p id="profit_error" class="profit-error" role="alert" hidden>초기 AI 기업 총 이익은 기본 500억원 이상으로 설정해 주세요.</p>
                 </div>
             </div>
 
@@ -37,7 +38,8 @@
 
                 <div class="field-group">
                     <label class="input-label" for="population">대한민국 인구수 (명)</label>
-                    <input type="number" id="population" min="10000000" max="100000000" step="10000" value="51744000" aria-label="인구수 입력">
+                    <input type="number" id="population" min="10000000" max="100000000" step="10000" value="51117378" aria-label="인구수 입력">
+                    <p class="input-hint">행정안전부 주민등록인구 기준 (2025.12.31)</p>
                 </div>
             </div>
 
@@ -54,10 +56,10 @@
             <div class="control-card">
                 <label class="input-label">분배 방식</label>
                 <div class="distribution-grid">
-                    <label class="scenario-tile"><input type="radio" name="distribution_mode" value="basic" checked><span class="tile-label">기본소득형<br><small>생활비 균등 지급</small></span></label>
-                    <label class="scenario-tile"><input type="radio" name="distribution_mode" value="custom"><span class="tile-label">맞춤형<br><small>소득별 차등</small></span></label>
-                    <label class="scenario-tile"><input type="radio" name="distribution_mode" value="equal"><span class="tile-label">동일 분배<br><small>같은 금액 지급</small></span></label>
-                    <label class="scenario-tile"><input type="radio" name="distribution_mode" value="targeted"><span class="tile-label">집중 지원<br><small>취약층 집중</small></span></label>
+                    <label class="scenario-tile"><input type="radio" name="distribution_mode" value="basic" checked><span class="tile-label" data-tooltip="모든 국민의 생활비를 안정적으로 보조합니다.&#10;예시: 모든 국민에게 연 100만원을 지급">기본소득형<br><small>생활비 균등 지급</small></span></label>
+                    <label class="scenario-tile"><input type="radio" name="distribution_mode" value="custom"><span class="tile-label" data-tooltip="소득 구간에 따라 액수를 조정합니다.&#10;예시: 1구간 연 200만원, 상위 구간 연 50만원">맞춤형<br><small>소득별 차등</small></span></label>
+                    <label class="scenario-tile"><input type="radio" name="distribution_mode" value="equal"><span class="tile-label" data-tooltip="계층 구분 없이 전 국민에게 똑같이 나눕니다.&#10;예시: 전 국민 연 100만원">동일 분배<br><small>같은 금액 지급</small></span></label>
+                    <label class="scenario-tile"><input type="radio" name="distribution_mode" value="targeted"><span class="tile-label" data-tooltip="예산을 취약계층에 집중합니다.&#10;예시: 저소득층 연 300만원, 고소득층 연 20만원">집중 지원<br><small>취약층 집중</small></span></label>
                 </div>
             </div>
 
@@ -119,6 +121,66 @@
             </section>
         </main>
     </div>
+
+    <div id="ai_report_modal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="ai_report_title" hidden>
+        <section class="modal-panel">
+            <div class="modal-header">
+                <div>
+                    <p class="modal-eyebrow">의사결정나무 AI 분석</p>
+                    <h2 id="ai_report_title">AI 정책 리포트</h2>
+                </div>
+                <button id="close_ai_report" class="modal-close" type="button" aria-label="리포트 닫기">×</button>
+            </div>
+            <div id="ai_report_loading" class="modal-loading">AI가 정책 결과와 미래 변화를 분석 중입니다...</div>
+            <div id="ai_report_content" class="modal-content" hidden></div>
+            <div class="gemini-chat">
+                <div class="ai-chat-heading">
+                    <h3>AI 정책 질문 도우미</h3>
+                    <button id="popup_ai_history_toggle" class="ai-history-toggle" type="button" aria-expanded="false" aria-label="이전 질문 목록 열기">☰</button>
+                </div>
+                <aside id="popup_ai_history_sidebar" class="ai-history-sidebar" aria-label="시뮬레이션별 질문 목록" hidden>
+                    <div class="ai-history-title">이전 질문</div>
+                    <div id="popup_ai_history_list" class="ai-history-list"></div>
+                </aside>
+                <p class="gemini-chat-hint">이 시뮬레이션 결과나 팝업의 예측에 대해 궁금한 점을 질문해 보세요. (아직 부족한 AI이므로 대답하지 못하는 질문이 있을 수 있습니다.)</p>
+                <div class="gemini-question-presets" aria-label="추천 질문">
+                    <button type="button" data-question="왜 2030년 예측이 이 결과로 나오나요?">2030년 예측 이유</button>
+                    <button type="button" data-question="세율을 올리면 어떤 결과가 달라지나요?">세율 변화 영향</button>
+                    <button type="button" data-question="분배 방식을 바꾸면 어떤 차이가 있나요?">분배 방식 비교</button>
+                    <button type="button" data-question="가장 좋은 개선안은 무엇인가요?">개선안 추천</button>
+                </div>
+                <div id="gemini_chat_messages" class="gemini-chat-messages" aria-live="polite"></div>
+                <form id="gemini_chat_form" class="gemini-chat-form">
+                    <input id="gemini_chat_input" type="text" maxlength="2000" placeholder="예: 왜 2030년 예측이 유지로 나오나요?" autocomplete="off">
+                    <button type="submit">질문하기</button>
+                </form>
+            </div>
+        </section>
+    </div>
+
+    <aside id="base_ai_helper" class="base-ai-helper" aria-label="AI 정책 질문 도우미">
+        <button id="base_ai_toggle" class="base-ai-toggle" type="button" aria-expanded="false">
+            <span>AI 도우미</span>
+            <span id="base_ai_toggle_icon">＋</span>
+        </button>
+        <p class="base-ai-notice">(아직 부족한 AI예요. 대답하지 못하는 질문이 있을 수 있습니다.)</p>
+        <div id="base_ai_panel" class="base-ai-panel" hidden>
+            <button id="base_ai_history_toggle" class="base-ai-history-toggle" type="button" aria-expanded="false" aria-label="이전 질문 목록 열기">☰ 이전 질문</button>
+            <aside id="base_ai_history_sidebar" class="base-ai-history-sidebar" aria-label="시뮬레이션별 질문 목록" hidden>
+                <div id="base_ai_history_list" class="ai-history-list"></div>
+            </aside>
+            <div class="base-ai-presets" aria-label="추천 질문">
+                <button type="button" data-question="왜 2030년 예측이 이 결과로 나오나요?">2030년 근거</button>
+                <button type="button" data-question="가장 좋은 개선안은 무엇인가요?">개선안</button>
+                <button type="button" data-question="세율을 올리면 어떤 차이가 있나요?">세율 비교</button>
+            </div>
+            <div id="base_ai_messages" class="base-ai-messages" aria-live="polite"></div>
+            <form id="base_ai_form" class="base-ai-form">
+                <input id="base_ai_input" type="text" maxlength="2000" placeholder="(여기에 궁금한 점을 질문해 보세요!)" autocomplete="off">
+                <button type="submit">전송</button>
+            </form>
+        </div>
+    </aside>
 
     <!-- Chart.js를 먼저 로드한 뒤, 메인 로직을 실행합니다 -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
